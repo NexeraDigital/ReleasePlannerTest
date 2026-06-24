@@ -1,0 +1,24 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+indent_style = space
+trim_trailing_whitespace = true
+
+[*.{cs,csproj,json,yml,yaml}]
+indent_size = 4
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.cs]
+# This codebase uses file-scoped namespaces; keep `dotnet format` in agreement.
+csharp_style_namespace_declarations = file_scoped:silent
+
+# High-performance logging via source-generated LoggerMessage delegates is the right call in a
+# hot service, but it adds boilerplate that obscures intent in a teaching example. We accept the
+# simple ILogger extension calls here.
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none

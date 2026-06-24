@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 
-namespace GitHubProjectConnection;
+namespace GitHubProjectConnection.Sample;
 
 /// <summary>Randomized issue + project field values produced for a single run.</summary>
 public sealed record GeneratedIssueData(
@@ -79,9 +79,9 @@ public static class SampleDataGenerator
             ["Roadmap Visibility Level"] = Text(Pick(VisibilityLevels, rng)),
             ["Product PM Name"] = Text(Pick(PmNames, rng)),
             ["PM LT"] = Text(Pick(PmLeadershipTeams, rng)),
-            ["Private Preview Date"] = Text(privatePreview.ToString("yyyy-MM-dd")),
-            ["Public Preview Date"] = Text(publicPreview.ToString("yyyy-MM-dd")),
-            ["GA Date"] = Text(ga.ToString("yyyy-MM-dd")),
+            ["Private Preview Date"] = Text(privatePreview.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+            ["Public Preview Date"] = Text(publicPreview.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+            ["GA Date"] = Text(ga.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
             ["Release Confidence Level"] = Text(Pick(ConfidenceLevels, rng)),
         };
 

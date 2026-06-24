@@ -1,117 +1,115 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using GitHubProjectConnection;
-using Microsoft.Extensions.Configuration;
+using GitHubProjectConnection.Auth;
+using GitHubProjectConnection.Clients;
+using GitHubProjectConnection.Errors;
+using GitHubProjectConnection.Options;
+using GitHubProjectConnection.Resilience;
+using GitHubProjectConnection.Sample;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 
 // ---------------------------------------------------------------------------
-// Configuration. appsettings.json can be overridden by environment variables,
-// e.g. set GitHubApp__ClientIdOrAppId / GitHubApp__PrivateKeyPath.
+// Options: bound from appsettings.json (or env vars, e.g. GitHubApp__PrivateKeyPath)
+// and validated up front so misconfiguration fails with a clear message.
 // ---------------------------------------------------------------------------
-IConfiguration config = new ConfigurationBuilder()
-    .SetBasePath(AppContext.BaseDirectory)
-    .AddJsonFile("appsettings.json", optional: false)
-    .AddEnvironmentVariables()
-    .Build();
+builder.Services.AddOptions<GitHubAppOptions>()
+    .Bind(builder.Configuration.GetSection(GitHubAppOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
-string clientIdOrAppId = Require(config, "GitHubApp:ClientIdOrAppId");
-string privateKeyPath = Require(config, "GitHubApp:PrivateKeyPath");
-string owner = Require(config, "Target:Owner");
-bool isOrg = config["Target:OwnerType"]?.Equals("organization", StringComparison.OrdinalIgnoreCase) ?? true;
-string repo = Require(config, "Target:Repo");
-int projectNumber = int.Parse(Require(config, "Target:ProjectNumber"));
+builder.Services.AddOptions<TargetOptions>()
+    .Bind(builder.Configuration.GetSection(TargetOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
-string privateKeyPem = File.ReadAllText(ResolvePath(privateKeyPath));
+// Caches the installation token across calls for the life of the process.
+builder.Services.AddSingleton<InstallationTokenProvider>();
 
-// One HttpClient for everything. GitHub requires a User-Agent header.
-using var http = new HttpClient { BaseAddress = new Uri("https://api.github.com/") };
-http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("GitHubProjectConnection", "1.0"));
+// Typed clients: one base address + User-Agent, each wrapped in the GitHub-aware
+// resilience pipeline (retry honoring Retry-After / rate-limit reset, circuit breaker, timeouts).
+builder.Services.AddHttpClient<GitHubAppAuthenticator>(ConfigureGitHubClient).AddGitHubResilience();
+builder.Services.AddHttpClient<GitHubRestClient>(ConfigureGitHubClient).AddGitHubResilience();
+builder.Services.AddHttpClient<GitHubProjectsClient>(ConfigureGitHubClient).AddGitHubResilience();
 
-// ---------------------------------------------------------------------------
-// 1. Authenticate as the GitHub App -> installation access token.
-// ---------------------------------------------------------------------------
-var authenticator = new GitHubAppAuthenticator(http, clientIdOrAppId, privateKeyPem);
-string jwt = authenticator.CreateJwt();
+using IHost host = builder.Build();
 
-long installationId = long.TryParse(config["GitHubApp:InstallationId"], out long configured) && configured > 0
-    ? configured
-    : await authenticator.GetInstallationIdAsync(jwt, owner, isOrg);
-Console.WriteLine($"Using installation id {installationId}.");
+ILogger<Program> logger = host.Services.GetRequiredService<ILogger<Program>>();
 
-string token = await authenticator.CreateInstallationTokenAsync(jwt, installationId);
-Console.WriteLine("Obtained installation access token.");
+// Force options validation now (clear error if config is missing/invalid).
+TargetOptions target = host.Services.GetRequiredService<IOptions<TargetOptions>>().Value;
+_ = host.Services.GetRequiredService<IOptions<GitHubAppOptions>>().Value;
 
-var github = new GitHubClient(http, token);
-
-// ---------------------------------------------------------------------------
-// 2. Create the issue. Use freshly generated sample data so repeated runs
-//    produce distinct issues and field values.
-// ---------------------------------------------------------------------------
-GeneratedIssueData sample = SampleDataGenerator.Generate();
-CreatedIssue issue = await github.CreateIssueAsync(owner, repo, sample.Title, sample.Body);
-Console.WriteLine($"Created issue #{issue.Number}: {issue.HtmlUrl}");
-
-// ---------------------------------------------------------------------------
-// 3. Resolve the project and read its custom fields.
-// ---------------------------------------------------------------------------
-string projectId = await github.GetProjectIdAsync(owner, isOrg, projectNumber);
-IReadOnlyDictionary<string, ProjectField> fields = await github.GetProjectFieldsAsync(projectId);
-Console.WriteLine($"Resolved project {projectId} with {fields.Count} fields:");
-foreach (ProjectField f in fields.Values)
+// Ctrl+C requests a graceful cancellation that flows through every API call.
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) =>
 {
-    string options = f.Options.Count > 0 ? $" [options: {string.Join(", ", f.Options.Keys)}]" : "";
-    Console.WriteLine($"    - {f.Name} ({f.DataType}){options}");
+    e.Cancel = true;
+    cts.Cancel();
+};
+
+GitHubRestClient rest = host.Services.GetRequiredService<GitHubRestClient>();
+GitHubProjectsClient projects = host.Services.GetRequiredService<GitHubProjectsClient>();
+
+try
+{
+    // 1. Generate fresh sample data so repeated runs produce distinct issues/values.
+    GeneratedIssueData sample = SampleDataGenerator.Generate();
+
+    // 2. Create the issue (REST).
+    CreatedIssue issue = await rest.CreateIssueAsync(target.Owner, target.Repo, sample.Title, sample.Body, cts.Token);
+    logger.LogInformation("Created issue #{Number}: {Url}", issue.Number, issue.HtmlUrl);
+
+    // 3. Resolve the project and read its custom fields (GraphQL).
+    string projectId = await projects.GetProjectIdAsync(target.Owner, target.IsOrganization, target.ProjectNumber, cts.Token);
+    IReadOnlyDictionary<string, ProjectField> fields = await projects.GetProjectFieldsAsync(projectId, cts.Token);
+    logger.LogInformation("Resolved project {ProjectId} with {Count} fields.", projectId, fields.Count);
+
+    // 4. Add the issue to the project.
+    string itemId = await projects.AddItemToProjectAsync(projectId, issue.NodeId, cts.Token);
+    logger.LogInformation("Added issue to project as item {ItemId}.", itemId);
+
+    // 5. Populate each sample field; a bad single value should not abort the whole run.
+    foreach ((string fieldName, JsonElement value) in sample.Fields)
+    {
+        if (!fields.TryGetValue(fieldName, out ProjectField? field))
+        {
+            logger.LogWarning("Skipping '{Field}' — no such field in the project.", fieldName);
+            continue;
+        }
+
+        try
+        {
+            await projects.UpdateFieldValueAsync(projectId, itemId, field, value, cts.Token);
+            logger.LogInformation("Set '{Field}' = {Value}", fieldName, value);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Could not set '{Field}': {Message}", fieldName, ex.Message);
+        }
+    }
+
+    logger.LogInformation("Done.");
+    return 0;
+}
+catch (OperationCanceledException)
+{
+    logger.LogWarning("Cancelled.");
+    return 130;
+}
+catch (GitHubApiException ex)
+{
+    logger.LogError("{Message}", ex.Message);
+    return 1;
 }
 
-// ---------------------------------------------------------------------------
-// 4. Add the issue to the project.
-// ---------------------------------------------------------------------------
-string itemId = await github.AddItemToProjectAsync(projectId, issue.NodeId);
-Console.WriteLine($"Added issue to project as item {itemId}.");
-
-// ---------------------------------------------------------------------------
-// 5. Populate each requested custom field.
-// ---------------------------------------------------------------------------
-foreach ((string fieldName, JsonElement value) in sample.Fields)
+static void ConfigureGitHubClient(HttpClient client)
 {
-    if (!fields.TryGetValue(fieldName, out ProjectField? field))
-    {
-        Console.WriteLine($"  ! Skipping '{fieldName}' — no such field in the project.");
-        continue;
-    }
-
-    try
-    {
-        await github.UpdateFieldValueAsync(projectId, itemId, field, value);
-        Console.WriteLine($"  ✓ Set '{fieldName}' = {value}");
-    }
-    catch (Exception ex)
-    {
-        // Don't abort the whole run because one field value is wrong.
-        Console.WriteLine($"  ! Could not set '{fieldName}': {ex.Message}");
-    }
-}
-
-Console.WriteLine("\nDone.");
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-static string Require(IConfiguration config, string key) =>
-    config[key] ?? throw new InvalidOperationException($"Missing required config value '{key}'.");
-
-static string ResolvePath(string path)
-{
-    if (Path.IsPathRooted(path)) return path;
-
-    // Look next to the running binary (output folder) first, then in the current
-    // working directory (the project root when launched via `dotnet run`).
-    foreach (string root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
-    {
-        string candidate = Path.Combine(root, path);
-        if (File.Exists(candidate)) return candidate;
-    }
-
-    throw new FileNotFoundException(
-        $"Could not find '{path}'. Place it next to appsettings.json or set " +
-        "GitHubApp:PrivateKeyPath to an absolute path.");
+    client.BaseAddress = new Uri("https://api.github.com/");
+    // GitHub requires a User-Agent header on every request.
+    client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("GitHubProjectConnection", "1.0"));
 }

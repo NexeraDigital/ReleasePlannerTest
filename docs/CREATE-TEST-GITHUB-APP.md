@@ -130,8 +130,9 @@ the exact names/options for your project and adjust the generator afterward.
 dotnet run
 ```
 
-A successful run prints the installation id, the created issue URL, the project's fields,
-and a `✓` per field set.
+A successful run logs the installation id, the created issue URL, the project's field count,
+and one line per field set (`Set '<field>' = <value>`). See the README's **Run** section for
+sample output.
 
 ---
 

@@ -6,7 +6,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>GitHubProjectConnection</RootNamespace>
+    <AssemblyName>GitHubProjectConnection</AssemblyName>
+
+    <!-- Treat the codebase as production: fail the build on any analyzer/compiler warning. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The test project lives under tests/; keep its sources out of this project's compilation. -->
+    <Compile Remove="tests/**/*.cs" />
+    <None Remove="tests/**" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Copy config to the output folder so the app can read it at runtime. -->
@@ -16,9 +28,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.0" />
+    <!-- Generic Host: brings configuration, options, logging, and DI. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.9" />
+    <!-- Typed HttpClient via IHttpClientFactory + the standard resilience pipeline. -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.7.0" />
   </ItemGroup>
 
 </Project>
