@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace GitHubProjects;
@@ -209,6 +210,120 @@ internal sealed class GitHubProjectsClient : GitHubClientBase, IGitHubProjectsCl
 
         return items;
     }
+
+    /// <summary>Reads every item in a project with its field values and last-updated timestamps.</summary>
+    public Task<IReadOnlyList<ProjectItemDetail>> GetProjectItemValuesAsync(
+        string projectId, CancellationToken cancellationToken) =>
+        ReadItemDetailsAsync(projectId, filter: null, cancellationToken);
+
+    /// <summary>Reads items last changed on or after a day, via the server-side <c>updated:&gt;=</c> filter.</summary>
+    public Task<IReadOnlyList<ProjectItemDetail>> GetItemsChangedSinceAsync(
+        string projectId, DateOnly sinceDay, CancellationToken cancellationToken) =>
+        ReadItemDetailsAsync(
+            projectId, filter: $"updated:>={sinceDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", cancellationToken);
+
+    private async Task<IReadOnlyList<ProjectItemDetail>> ReadItemDetailsAsync(
+        string projectId, string? filter, CancellationToken cancellationToken)
+    {
+        const string query = """
+            query($projectId: ID!, $filter: String, $pageSize: Int!, $after: String) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  items(first: $pageSize, after: $after, query: $filter) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      id
+                      updatedAt
+                      content {
+                        __typename
+                        ... on Issue { number title id }
+                        ... on PullRequest { number title id }
+                        ... on DraftIssue { title id }
+                      }
+                      fieldValues(first: 50) {
+                        nodes {
+                          __typename
+                          ... on ProjectV2ItemFieldTextValue { text updatedAt creator { login } field { ... on ProjectV2FieldCommon { name dataType } } }
+                          ... on ProjectV2ItemFieldNumberValue { number updatedAt creator { login } field { ... on ProjectV2FieldCommon { name dataType } } }
+                          ... on ProjectV2ItemFieldDateValue { date updatedAt creator { login } field { ... on ProjectV2FieldCommon { name dataType } } }
+                          ... on ProjectV2ItemFieldSingleSelectValue { name updatedAt creator { login } field { ... on ProjectV2FieldCommon { name dataType } } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var items = new List<ProjectItemDetail>();
+        string? after = null;
+
+        do
+        {
+            JsonElement data = await GraphQLAsync(
+                query, new { projectId, filter, pageSize = PageSize, after }, "read item values", cancellationToken);
+
+            JsonElement conn = data.GetProperty("node").GetProperty("items");
+            foreach (JsonElement node in conn.GetProperty("nodes").EnumerateArray())
+                items.Add(ParseItemDetail(node));
+
+            JsonElement pageInfo = conn.GetProperty("pageInfo");
+            after = pageInfo.GetProperty("hasNextPage").GetBoolean()
+                ? pageInfo.GetProperty("endCursor").GetString()
+                : null;
+        }
+        while (after is not null);
+
+        return items;
+    }
+
+    private static ProjectItemDetail ParseItemDetail(JsonElement node)
+    {
+        string id = node.GetProperty("id").GetString()!;
+        DateTimeOffset updatedAt = node.GetProperty("updatedAt").GetDateTimeOffset();
+
+        int? number = null;
+        string? title = null;
+        string? contentId = null;
+        if (node.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object)
+        {
+            if (content.TryGetProperty("number", out JsonElement num)) number = num.GetInt32();
+            if (content.TryGetProperty("title", out JsonElement t)) title = t.GetString();
+            if (content.TryGetProperty("id", out JsonElement cid)) contentId = cid.GetString();
+        }
+
+        var values = new List<ProjectItemFieldValue>();
+        foreach (JsonElement fv in node.GetProperty("fieldValues").GetProperty("nodes").EnumerateArray())
+        {
+            if (!fv.TryGetProperty("field", out JsonElement field) || field.ValueKind != JsonValueKind.Object) continue;
+            if (!field.TryGetProperty("name", out JsonElement fieldName)) continue;
+
+            string dataType = field.TryGetProperty("dataType", out JsonElement dt) ? dt.GetString() ?? "" : "";
+            string? value = fv.GetProperty("__typename").GetString() switch
+            {
+                "ProjectV2ItemFieldSingleSelectValue" => GetString(fv, "name"),
+                "ProjectV2ItemFieldTextValue" => GetString(fv, "text"),
+                "ProjectV2ItemFieldDateValue" => GetString(fv, "date"),
+                "ProjectV2ItemFieldNumberValue" => fv.TryGetProperty("number", out JsonElement n)
+                    ? n.GetDouble().ToString(CultureInfo.InvariantCulture)
+                    : null,
+                _ => null
+            };
+
+            DateTimeOffset? fieldUpdated = fv.TryGetProperty("updatedAt", out JsonElement fu) &&
+                                           fu.TryGetDateTimeOffset(out DateTimeOffset parsed) ? parsed : null;
+            string? updatedBy = fv.TryGetProperty("creator", out JsonElement cr) && cr.ValueKind == JsonValueKind.Object
+                ? GetString(cr, "login") : null;
+
+            values.Add(new ProjectItemFieldValue(fieldName.GetString()!, dataType, value, fieldUpdated, updatedBy));
+        }
+
+        return new ProjectItemDetail(id, number, title, contentId, updatedAt, values);
+    }
+
+    private static string? GetString(JsonElement element, string property) =>
+        element.TryGetProperty(property, out JsonElement value) ? value.GetString() : null;
 
     /// <summary>Adds an issue/PR (by content node id) to a project. Returns the project item id.</summary>
     public async Task<string> AddItemToProjectAsync(

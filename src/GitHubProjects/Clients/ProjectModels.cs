@@ -12,6 +12,24 @@ public sealed record CreatedIssue(string NodeId, int Number, string HtmlUrl);
 /// <summary>An existing item in a project, with the linked issue/PR number and title when present.</summary>
 public sealed record ProjectItem(string Id, int? Number, string? Title);
 
+/// <summary>One field's value on a project item, with when and by whom it was last set.</summary>
+public sealed record ProjectItemFieldValue(
+    string FieldName, string DataType, string? Value, DateTimeOffset? UpdatedAt, string? UpdatedBy);
+
+/// <summary>
+/// A project item with its content reference, item-level last-updated timestamp, and field values.
+/// <see cref="UpdatedAt"/> is the item's <c>updatedAt</c> — it moves whenever a field value changes,
+/// even when the underlying issue is untouched (use it as the change watermark for delta sync).
+/// </summary>
+public sealed record ProjectItemDetail(
+    string Id, int? Number, string? Title, string? ContentNodeId,
+    DateTimeOffset UpdatedAt, IReadOnlyList<ProjectItemFieldValue> FieldValues)
+{
+    /// <summary>The value of a field by name on this item, or null if unset.</summary>
+    public string? ValueOf(string fieldName) =>
+        FieldValues.FirstOrDefault(v => string.Equals(v.FieldName, fieldName, StringComparison.OrdinalIgnoreCase))?.Value;
+}
+
 /// <summary>A single-select field with its full option details (id, name, color, description).</summary>
 public sealed record SingleSelectFieldDetail(string FieldId, string Name, IReadOnlyList<SingleSelectOption> Options);
 

@@ -37,6 +37,7 @@ public static class SampleServiceCollectionExtensions
         services.AddSingleton<ISampleCommand, PopulateExistingCommand>();
         services.AddSingleton<ISampleCommand, ValidateDropdownCommand>();
         services.AddSingleton<ISampleCommand, AddOptionsDemoCommand>();
+        services.AddSingleton<ISampleCommand, ListChangedCommand>();
         services.AddSingleton<ISampleCommand, HelpCommand>();
         services.AddSingleton<SampleCommandDispatcher>();
 

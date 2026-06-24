@@ -154,11 +154,21 @@ dotnet run --project src/GitHubProjectConnection.App -- --validate-dropdown
 
 ## Verification / diagnostics
 
-### Audit per-item field VALUES (read + diff before/after a change) — 🟡 Not in the library yet
-`GetProjectItemsAsync` returns item ids/numbers/titles but **not** their field values. Reading the
-actual values per item (e.g. each issue's `Organization`) and diffing before/after a schema change
-was done with a one-off GraphQL script. A `GetProjectItemValuesAsync` method (+ an `--audit-values`
-command) would make this first-class.
+### Read per-item field VALUES (with timestamps + author) — 🟢 Library
+```csharp
+IReadOnlyList<ProjectItemDetail> items = await projects.GetProjectItemValuesAsync(projectId, ct);
+// item.UpdatedAt, item.ValueOf("Organization"), and per-field UpdatedAt + UpdatedBy
+```
+
+### Delta sync: query only items changed since a watermark — 🟢 Library / 🔵 Command
+Server-side `updated:` filter (date-granularity); refine to an exact instant with `item.UpdatedAt`.
+See [DELTA-SYNC.md](DELTA-SYNC.md) for the full loop and caveats.
+```csharp
+var changed = await projects.GetItemsChangedSinceAsync(projectId, DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1), ct);
+```
+```bash
+dotnet run --project src/GitHubProjectConnection.App -- --list-changed
+```
 
 ### List all commands — 🔵 Command
 ```bash
@@ -203,5 +213,6 @@ dotnet run --project src/GitHubProjectConnection.App -- --help
 | 19 | Lower-level option edit preserving ids | 🟢 Library (`UpdateFieldAsync`) |
 | 20 | Add option (idempotent) then revert | 🔵 Command (`--add-option-demo`) |
 | 21 | Validate non-destructive modification | 🔵 Command (`--validate-dropdown`) |
-| 22 | Audit per-item field values + diff | 🟡 Not in the library yet (script) |
-| 23 | List commands | 🔵 Command (`--help`) |
+| 22 | Read per-item field values (timestamps + author) | 🟢 Library (`GetProjectItemValuesAsync`) |
+| 23 | Delta sync — items changed since a watermark | 🟢 Library (`GetItemsChangedSinceAsync`) / 🔵 (`--list-changed`) |
+| 24 | List commands | 🔵 Command (`--help`) |

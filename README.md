@@ -75,6 +75,8 @@ What this project can do — see [docs/USE-CASES.md](docs/USE-CASES.md) for runn
 - **Add dropdown options without clearing existing ones** — non-destructive, idempotent (the headline use case).
 - **Populate or re-populate** an issue's (or every existing item's) fields with sample data.
 - **Verify non-destructively** — add an option / audit values and confirm existing data is untouched.
+- **Delta sync** — query only the items changed since a watermark (with attribution), for two-way
+  sync back to a source system; see [docs/DELTA-SYNC.md](docs/DELTA-SYNC.md).
 
 Each capability is tagged in the doc as 🟢 **library API**, 🔵 **sample command** (`-- <flag>`), or
 🟡 **not yet in the library**.
@@ -242,6 +244,7 @@ in `appsettings.json` and exits.
 | `… -- --populate-existing` | Walks **every item already in the project** and sets fresh sample values on each (re-randomizes on every run; unknown fields and bad values are skipped, not fatal). | `Commands/PopulateExistingCommand.cs` |
 | `… -- --validate-dropdown` | Proves a dropdown can be modified non-destructively: adds an option, verifies the existing ones survive, then reverts. | `Commands/ValidateDropdownCommand.cs` |
 | `… -- --add-option-demo` | Adds a dropdown option **without clearing existing ones** (idempotent + case-insensitive), then reverts. | `Commands/AddOptionsDemoCommand.cs` |
+| `… -- --list-changed` | Lists items **changed since yesterday** via the server-side `updated:` filter, with per-field attribution (for delta sync). | `Commands/ListChangedCommand.cs` |
 | `… -- --help` | List all commands and exit. | `Commands/HelpCommand.cs` |
 
 Commands follow a small **command pattern**: each implements `ISampleCommand` (a `Flag`, a

@@ -29,6 +29,26 @@ public interface IGitHubProjectsClient
     Task<IReadOnlyList<ProjectItem>> GetProjectItemsAsync(
         string projectId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Reads every item in a project with its field values and last-updated timestamps (full scan).
+    /// Use this for a guaranteed-complete delta by comparing each item's
+    /// <see cref="ProjectItemDetail.UpdatedAt"/> to your watermark client-side.
+    /// </summary>
+    Task<IReadOnlyList<ProjectItemDetail>> GetProjectItemValuesAsync(
+        string projectId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads items last changed on or after <paramref name="sinceDay"/>, using the server-side
+    /// <c>updated:&gt;=</c> Projects filter to avoid scanning the whole project.
+    /// <para>
+    /// The server filter is <strong>date-granularity</strong> (the time part is ignored), so this
+    /// returns everything changed that day or later — refine to a precise instant by comparing each
+    /// item's <see cref="ProjectItemDetail.UpdatedAt"/> (a full timestamp) to your watermark.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<ProjectItemDetail>> GetItemsChangedSinceAsync(
+        string projectId, DateOnly sinceDay, CancellationToken cancellationToken);
+
     /// <summary>Adds an issue/PR (by content node id) to a project. Returns the project item id.</summary>
     Task<string> AddItemToProjectAsync(
         string projectId, string contentNodeId, CancellationToken cancellationToken);
