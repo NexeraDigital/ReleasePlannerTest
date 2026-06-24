@@ -64,6 +64,21 @@ dotnet test
 > Everything the app writes is **sample/test data** — see [Sample data](#sample-data). Run it only
 > against a test repo and project. Stuck? See [Notes & troubleshooting](#notes--troubleshooting).
 
+## Use cases
+
+What this project can do — see [docs/USE-CASES.md](docs/USE-CASES.md) for runnable examples of each.
+
+- **Authenticate as a GitHub App** — JWT → cached installation token, with installation auto-discovery.
+- **Create issues** and **add them to a Project (V2)**.
+- **Read project fields and items**, and **set field values** (text / number / date / single-select).
+- **Manage custom fields (custom properties)** — create, rename, delete, and convert a text field to a dropdown.
+- **Add dropdown options without clearing existing ones** — non-destructive, idempotent (the headline use case).
+- **Populate or re-populate** an issue's (or every existing item's) fields with sample data.
+- **Verify non-destructively** — add an option / audit values and confirm existing data is untouched.
+
+Each capability is tagged in the doc as 🟢 **library API**, 🔵 **sample command** (`-- <flag>`), or
+🟡 **not yet in the library**.
+
 ### Using the library
 
 Reference `GitHubProjects` and register it on any `IServiceCollection`, then inject the clients:
