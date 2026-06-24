@@ -135,6 +135,30 @@ info: Program[0]
       Done.
 ```
 
+## Managing custom fields & items (commands)
+
+Beyond the default flow, the program exposes a few optional actions for managing a project's
+custom-field **definitions** and the values on **existing** items. Each runs against the project
+in `appsettings.json` and exits.
+
+| Command | What it does | Source |
+|---------|--------------|--------|
+| `dotnet run -- --manage-fields-demo` | Self-cleaning demo: creates a single-select field, updates it **non-destructively** (rename + keep existing options by id + add one), then deletes it. | `Sample/ManageFieldsDemo.cs` |
+| `dotnet run -- --convert-dropdowns` | Converts selected TEXT fields into single-select dropdowns. **Destructive** — GitHub can't change a field's type in place, so each field is **deleted and recreated**, losing its existing values. | `Sample/ConvertFieldsToDropdowns.cs` |
+| `dotnet run -- --populate-existing` | Walks **every item already in the project** and sets fresh sample values on each (re-randomizes on every run; unknown fields and bad values are skipped, not fatal). | `Sample/PopulateExistingItems.cs` |
+
+These are backed by `ManageFieldsClient` (`CreateFieldAsync` / `UpdateFieldAsync` /
+`DeleteFieldAsync`) and `GitHubProjectsClient.GetProjectItemsAsync`.
+
+> **Non-destructive option edits:** `UpdateFieldAsync` sends the **full** single-select option
+> list. Include each existing option's **`Id`** (from `GetProjectFieldsAsync`) to preserve it and
+> the values already assigned to it; any option you omit is removed.
+
+> **Field types can't be changed in place.** There is no API to turn a TEXT field into a
+> SINGLE_SELECT; converting means delete + recreate, which clears that field's values across all
+> items. The field names/options in `--convert-dropdowns` are sample values — edit
+> `ConvertFieldsToDropdowns.cs` for your own project.
+
 ## Test
 
 ```bash
