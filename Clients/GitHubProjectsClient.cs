@@ -97,6 +97,65 @@ public sealed class GitHubProjectsClient : GitHubClientBase
         return fields;
     }
 
+    /// <summary>
+    /// Reads a single-select field's full option details (id, name, color, description) so an
+    /// update can round-trip them. Returns null if no single-select field has that name.
+    /// </summary>
+    public async Task<SingleSelectFieldDetail?> GetSingleSelectFieldAsync(
+        string projectId, string fieldName, CancellationToken cancellationToken)
+    {
+        const string query = """
+            query($projectId: ID!, $pageSize: Int!, $after: String) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  fields(first: $pageSize, after: $after) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      ... on ProjectV2SingleSelectField {
+                        id name
+                        options { id name color description }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        string? after = null;
+        do
+        {
+            JsonElement data = await GraphQLAsync(
+                query, new { projectId, pageSize = FieldPageSize, after }, "read single-select field", cancellationToken);
+
+            JsonElement fieldsConn = data.GetProperty("node").GetProperty("fields");
+            foreach (JsonElement node in fieldsConn.GetProperty("nodes").EnumerateArray())
+            {
+                if (!node.TryGetProperty("options", out _)) continue; // not a single-select field union
+                if (!string.Equals(node.GetProperty("name").GetString(), fieldName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var options = new List<SingleSelectOption>();
+                foreach (JsonElement opt in node.GetProperty("options").EnumerateArray())
+                    options.Add(new SingleSelectOption(
+                        opt.GetProperty("name").GetString()!,
+                        opt.GetProperty("color").GetString()!,
+                        opt.GetProperty("description").GetString(),
+                        opt.GetProperty("id").GetString()!));
+
+                return new SingleSelectFieldDetail(node.GetProperty("id").GetString()!, node.GetProperty("name").GetString()!, options);
+            }
+
+            JsonElement pageInfo = fieldsConn.GetProperty("pageInfo");
+            after = pageInfo.GetProperty("hasNextPage").GetBoolean()
+                ? pageInfo.GetProperty("endCursor").GetString()
+                : null;
+        }
+        while (after is not null);
+
+        return null;
+    }
+
     /// <summary>Lists every item already in a project (item id + linked issue/PR number and title), paging as needed.</summary>
     public async Task<IReadOnlyList<ProjectItem>> GetProjectItemsAsync(
         string projectId, CancellationToken cancellationToken)

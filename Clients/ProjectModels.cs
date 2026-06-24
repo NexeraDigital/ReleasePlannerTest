@@ -12,6 +12,9 @@ public sealed record CreatedIssue(string NodeId, int Number, string HtmlUrl);
 /// <summary>An existing item in a project, with the linked issue/PR number and title when present.</summary>
 public sealed record ProjectItem(string Id, int? Number, string? Title);
 
+/// <summary>A single-select field with its full option details (id, name, color, description).</summary>
+public sealed record SingleSelectFieldDetail(string FieldId, string Name, IReadOnlyList<SingleSelectOption> Options);
+
 /// <summary>
 /// Translates a raw configured/sample value into the GraphQL <c>ProjectV2FieldValue</c> shape
 /// for a given field's data type. Pure (no I/O) so it is straightforward to unit test.

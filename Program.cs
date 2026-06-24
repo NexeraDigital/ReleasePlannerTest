@@ -81,6 +81,14 @@ try
         return await PopulateExistingItems.RunAsync(projects, target, logger, cts.Token);
     }
 
+    // Optional: validate a dropdown can be modified non-destructively (add option, then revert).
+    // Run: dotnet run -- --validate-dropdown
+    if (args.Contains("--validate-dropdown"))
+    {
+        ManageFieldsClient manage = host.Services.GetRequiredService<ManageFieldsClient>();
+        return await ValidateDropdown.RunAsync(projects, manage, target, logger, cts.Token);
+    }
+
     // 1. Generate fresh sample data so repeated runs produce distinct issues/values.
     GeneratedIssueData sample = SampleDataGenerator.Generate();
 
