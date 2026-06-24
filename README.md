@@ -65,9 +65,11 @@ src/
     Resilience/                            AddStandardResilienceHandler + GitHub rate-limit interpretation
     GitHubApiException.cs                  Typed errors parsed from REST/GraphQL bodies
   GitHubProjectConnection.App/             ← thin console consumer of the library
-    Program.cs                             Host bootstrap + orchestration
+    Program.cs                             ~13 lines: build host, AddSampleApp, RunSampleAsync
+    Hosting/                               AddSampleApp (DI wiring) + RunSampleAsync (dispatch + exit codes)
+    Commands/                              ISampleCommand + dispatcher + one class per --flag (and --help)
     Options/TargetOptions.cs               App-specific repo/project target (validated)
-    Sample/                                Randomized data + the --* command runners
+    Sample/SampleDataGenerator.cs          Randomized sample data
     appsettings.json
 tests/
   GitHubProjects.Tests/                    xUnit tests (JWT, field/value shaping, errors, rate-limit)
@@ -172,10 +174,16 @@ in `appsettings.json` and exits.
 
 | Command | What it does | Source |
 |---------|--------------|--------|
-| `dotnet run --project src/GitHubProjectConnection.App -- --manage-fields-demo` | Self-cleaning demo: creates a single-select field, updates it **non-destructively** (rename + keep existing options by id + add one), then deletes it. | `Sample/ManageFieldsDemo.cs` |
-| `… -- --convert-dropdowns` | Converts selected TEXT fields into single-select dropdowns. **Destructive** — GitHub can't change a field's type in place, so each field is **deleted and recreated**, losing its existing values. | `Sample/ConvertFieldsToDropdowns.cs` |
-| `… -- --populate-existing` | Walks **every item already in the project** and sets fresh sample values on each (re-randomizes on every run; unknown fields and bad values are skipped, not fatal). | `Sample/PopulateExistingItems.cs` |
-| `… -- --validate-dropdown` | Proves a dropdown can be modified non-destructively: adds an option, verifies the existing ones survive, then reverts. | `Sample/ValidateDropdown.cs` |
+| `dotnet run --project src/GitHubProjectConnection.App -- --manage-fields-demo` | Self-cleaning demo: creates a single-select field, updates it **non-destructively** (rename + keep existing options by id + add one), then deletes it. | `Commands/ManageFieldsDemoCommand.cs` |
+| `… -- --convert-dropdowns` | Converts selected TEXT fields into single-select dropdowns. **Destructive** — GitHub can't change a field's type in place, so each field is **deleted and recreated**, losing its existing values. | `Commands/ConvertDropdownsCommand.cs` |
+| `… -- --populate-existing` | Walks **every item already in the project** and sets fresh sample values on each (re-randomizes on every run; unknown fields and bad values are skipped, not fatal). | `Commands/PopulateExistingCommand.cs` |
+| `… -- --validate-dropdown` | Proves a dropdown can be modified non-destructively: adds an option, verifies the existing ones survive, then reverts. | `Commands/ValidateDropdownCommand.cs` |
+| `… -- --help` | List all commands and exit. | `Commands/HelpCommand.cs` |
+
+Commands follow a small **command pattern**: each implements `ISampleCommand` (a `Flag`, a
+`Description`, and `RunAsync`) and receives its dependencies by injection; `SampleCommandDispatcher`
+picks one by CLI flag. Adding a command is one class plus one `AddSingleton<ISampleCommand, …>()`
+line in `Hosting/SampleServiceCollectionExtensions.cs`.
 
 These are backed by the library's `IGitHubFieldManager` (`CreateFieldAsync` / `UpdateFieldAsync` /
 `DeleteFieldAsync`) and `IGitHubProjectsClient.GetProjectItemsAsync`.

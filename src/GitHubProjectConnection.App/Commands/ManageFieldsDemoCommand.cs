@@ -1,27 +1,42 @@
 using GitHubProjectConnection.Options;
 using GitHubProjects;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace GitHubProjectConnection.Sample;
+namespace GitHubProjectConnection.Commands;
 
 /// <summary>
 /// Demonstrates managing custom-field <em>definitions</em> end to end against the configured
 /// project: create a single-select field, update it non-destructively (rename + keep existing
 /// options by id + add a new one), then delete it so nothing is left behind.
-///
-/// Run with: <c>dotnet run -- --manage-fields-demo</c>
 /// </summary>
-public static class ManageFieldsDemo
+public sealed class ManageFieldsDemoCommand : ISampleCommand
 {
-    public static async Task<int> RunAsync(
-        IGitHubFieldManager manage, IGitHubProjectsClient projects, TargetOptions target,
-        ILogger logger, CancellationToken cancellationToken)
+    private readonly IGitHubFieldManager _manage;
+    private readonly IGitHubProjectsClient _projects;
+    private readonly TargetOptions _target;
+    private readonly ILogger<ManageFieldsDemoCommand> _logger;
+
+    public ManageFieldsDemoCommand(
+        IGitHubFieldManager manage, IGitHubProjectsClient projects,
+        IOptions<TargetOptions> target, ILogger<ManageFieldsDemoCommand> logger)
     {
-        string projectId = await projects.GetProjectIdAsync(
-            target.Owner, target.IsOrganization, target.ProjectNumber, cancellationToken);
+        _manage = manage;
+        _projects = projects;
+        _target = target.Value;
+        _logger = logger;
+    }
+
+    public string Flag => "--manage-fields-demo";
+    public string Description => "Self-cleaning demo: create a field, update it non-destructively, then delete it.";
+
+    public async Task<int> RunAsync(CancellationToken cancellationToken)
+    {
+        string projectId = await _projects.GetProjectIdAsync(
+            _target.Owner, _target.IsOrganization, _target.ProjectNumber, cancellationToken);
 
         // 1. Create a single-select field with three options.
-        ProjectField created = await manage.CreateFieldAsync(
+        ProjectField created = await _manage.CreateFieldAsync(
             projectId, "SINGLE_SELECT", "Demo Priority (sample)",
             new[]
             {
@@ -30,7 +45,7 @@ public static class ManageFieldsDemo
                 new SingleSelectOption("High", "RED"),
             },
             cancellationToken);
-        logger.LogInformation(
+        _logger.LogInformation(
             "Created field '{Name}' ({Id}) with options: {Options}",
             created.Name, created.Id, string.Join(", ", created.Options.Keys));
 
@@ -40,15 +55,15 @@ public static class ManageFieldsDemo
             .Append(new SingleSelectOption("Critical", "PURPLE"))              // new option (no id)
             .ToArray();
 
-        ProjectField updated = await manage.UpdateFieldAsync(
+        ProjectField updated = await _manage.UpdateFieldAsync(
             created.Id, "Demo Priority renamed (sample)", keptPlusNew, cancellationToken);
-        logger.LogInformation(
+        _logger.LogInformation(
             "Updated field -> '{Name}' with options: {Options}",
             updated.Name, string.Join(", ", updated.Options.Keys));
 
         // 3. Clean up so the demo leaves the project as it found it.
-        await manage.DeleteFieldAsync(created.Id, cancellationToken);
-        logger.LogInformation("Deleted field {Id}. Demo complete.", created.Id);
+        await _manage.DeleteFieldAsync(created.Id, cancellationToken);
+        _logger.LogInformation("Deleted field {Id}. Demo complete.", created.Id);
 
         return 0;
     }

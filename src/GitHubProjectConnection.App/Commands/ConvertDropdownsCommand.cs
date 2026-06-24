@@ -1,17 +1,16 @@
 using GitHubProjectConnection.Options;
 using GitHubProjects;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace GitHubProjectConnection.Sample;
+namespace GitHubProjectConnection.Commands;
 
 /// <summary>
-/// One-off utility: converts selected TEXT custom fields into single-select dropdowns.
-/// GitHub can't change a field's type in place, so each field is deleted and recreated as a
-/// SINGLE_SELECT with the same name (existing text values on that field are lost).
-///
-/// Run with: <c>dotnet run -- --convert-dropdowns</c>
+/// Converts selected TEXT custom fields into single-select dropdowns. GitHub can't change a
+/// field's type in place, so each field is deleted and recreated as a SINGLE_SELECT with the
+/// same name (existing text values on that field are lost).
 /// </summary>
-public static class ConvertFieldsToDropdowns
+public sealed class ConvertDropdownsCommand : ISampleCommand
 {
     // Fields shown as dropdowns (chevron) in the Launch Plan form, with sample option sets.
     private static readonly (string Field, SingleSelectOption[] Options)[] Targets =
@@ -53,40 +52,56 @@ public static class ConvertFieldsToDropdowns
         }),
     };
 
-    public static async Task<int> RunAsync(
-        IGitHubFieldManager manage, IGitHubProjectsClient projects, TargetOptions target,
-        ILogger logger, CancellationToken cancellationToken)
+    private readonly IGitHubFieldManager _manage;
+    private readonly IGitHubProjectsClient _projects;
+    private readonly TargetOptions _target;
+    private readonly ILogger<ConvertDropdownsCommand> _logger;
+
+    public ConvertDropdownsCommand(
+        IGitHubFieldManager manage, IGitHubProjectsClient projects,
+        IOptions<TargetOptions> target, ILogger<ConvertDropdownsCommand> logger)
     {
-        string projectId = await projects.GetProjectIdAsync(
-            target.Owner, target.IsOrganization, target.ProjectNumber, cancellationToken);
+        _manage = manage;
+        _projects = projects;
+        _target = target.Value;
+        _logger = logger;
+    }
+
+    public string Flag => "--convert-dropdowns";
+    public string Description => "Convert selected TEXT fields into dropdowns (destructive: delete + recreate).";
+
+    public async Task<int> RunAsync(CancellationToken cancellationToken)
+    {
+        string projectId = await _projects.GetProjectIdAsync(
+            _target.Owner, _target.IsOrganization, _target.ProjectNumber, cancellationToken);
         IReadOnlyDictionary<string, ProjectField> fields =
-            await projects.GetProjectFieldsAsync(projectId, cancellationToken);
+            await _projects.GetProjectFieldsAsync(projectId, cancellationToken);
 
         foreach ((string name, SingleSelectOption[] options) in Targets)
         {
             if (!fields.TryGetValue(name, out ProjectField? existing))
             {
-                logger.LogWarning("Field '{Name}' not found — skipping.", name);
+                _logger.LogWarning("Field '{Name}' not found — skipping.", name);
                 continue;
             }
 
             if (existing.DataType == "SINGLE_SELECT")
             {
-                logger.LogInformation("Field '{Name}' is already a dropdown — skipping.", name);
+                _logger.LogInformation("Field '{Name}' is already a dropdown — skipping.", name);
                 continue;
             }
 
             // Delete the TEXT field, then recreate it with the same name as a single-select.
-            await manage.DeleteFieldAsync(existing.Id, cancellationToken);
-            ProjectField created = await manage.CreateFieldAsync(
+            await _manage.DeleteFieldAsync(existing.Id, cancellationToken);
+            ProjectField created = await _manage.CreateFieldAsync(
                 projectId, "SINGLE_SELECT", name, options, cancellationToken);
 
-            logger.LogInformation(
+            _logger.LogInformation(
                 "Converted '{Name}' to dropdown with options: {Options}",
                 name, string.Join(", ", created.Options.Keys));
         }
 
-        logger.LogInformation("Dropdown conversion complete.");
+        _logger.LogInformation("Dropdown conversion complete.");
         return 0;
     }
 }
