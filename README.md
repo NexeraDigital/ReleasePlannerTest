@@ -21,7 +21,19 @@ the project parts of this sample use GraphQL while issue creation uses REST.
 | 7. Set fields | GraphQL | `updateProjectV2ItemFieldValue(...)` per field |
 
 Source files: `GitHubAppAuthenticator.cs` (auth), `GitHubClient.cs` (REST + GraphQL),
-`Program.cs` (orchestration), `appsettings.json` (config).
+`Program.cs` (orchestration), `SampleDataGenerator.cs` (sample data), `appsettings.json` (config).
+
+## Sample data
+
+The values this tool writes are **sample/test data only** — they do not represent real
+products, dates, people, or release plans. They exist solely to demonstrate populating a
+GitHub Project's custom fields.
+
+- `SampleDataGenerator.cs` generates randomized issue titles, bodies, and field values on
+  every run, so repeated runs create distinct sample issues.
+- Issues created by this tool are safe to delete. Run it only against a **test repo and
+  test project**, never a production board.
+- The static values in `appsettings.json` under `CustomFields` are likewise placeholders.
 
 ## Prerequisites
 
@@ -55,7 +67,7 @@ Any value can also be supplied via environment variables, e.g.
 dotnet run
 ```
 
-Expected output:
+Each run creates a new **sample** issue (see [Sample data](#sample-data)). Expected output:
 
 ```
 Using installation id 12345678.
