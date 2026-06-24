@@ -1,0 +1,159 @@
+# Creating a Test GitHub App for this sample
+
+Step-by-step guide to register a GitHub App, install it on the account/org that owns your
+test repo and project, and fill in `appsettings.json` so the sample can run.
+
+> Use a **test repo and test project**, not production. The sample creates real issues.
+
+---
+
+## 1. Register the App
+
+Pick where the App is **owned** (this is who manages it — separate from where it can act):
+
+- **Org-owned (recommended for org repos/projects):**
+  `https://github.com/organizations/<ORG>/settings/apps/new`
+- **Personal-owned:** `https://github.com/settings/apps/new`
+
+Fill in:
+
+| Field | Value |
+|-------|-------|
+| **GitHub App name** | Anything unique, e.g. `my-project-writer-test` |
+| **Homepage URL** | Any valid URL (e.g. your repo URL) — required but unused |
+| **Webhook → Active** | **Uncheck it.** This sample polls the API; it needs no webhook |
+
+---
+
+## 2. Set permissions
+
+Scroll to **Permissions** and set exactly these (leave everything else **No access**):
+
+| Section | Permission | Access | Why |
+|---------|------------|--------|-----|
+| **Repository** | **Issues** | **Read and write** | Create the issue |
+| **Organization** | **Projects** | **Read and write** | Read fields & write custom field values on an **org** project |
+
+> If your project is **user/personal-owned** instead of org-owned, use
+> **Repository → Projects: Read and write** rather than the Organization one.
+> Org projects need the **Organization** Projects permission — this is the most common mistake.
+
+Click **Create GitHub App**.
+
+---
+
+## 3. Generate a private key
+
+On the App's settings page → **Private keys** → **Generate a private key**.
+A `.pem` downloads. This is what `GitHubApp.PrivateKeyPath` points to.
+
+> Keep it secret. The repo's `.gitignore` already excludes `*.pem`.
+
+---
+
+## 4. Copy the Client ID
+
+At the top of the App settings page, copy the **Client ID** (looks like `Iv23li...`).
+This goes in `GitHubApp.ClientIdOrAppId`. (The numeric App ID also works, but GitHub
+recommends the Client ID as the JWT issuer.)
+
+---
+
+## 5. Make the App installable on the target (only if needed)
+
+You only need this if the App is **personal-owned** but you want to install it on an **org**:
+
+1. App settings → scroll to the **bottom** of the page.
+2. Click **Make public** (the old "Where can this app be installed?" control is now this button).
+   - **Private** = installable only on the owner account.
+   - **Public** = installable on any account/org.
+
+> Skip this step if the App is already owned by the org you'll install it on — org-owned
+> Apps are installable on that org while staying private.
+
+---
+
+## 6. Install the App on the owner
+
+The App must be installed on the account/org that **owns both the repo and the project**.
+
+1. App settings → left sidebar → **Install App**
+   (`https://github.com/settings/apps/<app-name>/installations`,
+   or the public page `https://github.com/apps/<app-slug>`).
+2. Click **Install** next to the target org/account.
+   - If you're an **owner/admin**, it installs immediately.
+   - If not, the button says **Request** and an org owner must approve it.
+3. On **Repository access**, choose **Only select repositories → <your test repo>**
+   (or **All repositories**), then **Install**.
+
+> If you change permissions **after** installing, GitHub marks the install pending until an
+> owner re-approves the new permissions.
+
+---
+
+## 7. Find your project number
+
+Open your project and read the number from the URL:
+
+- Org project: `https://github.com/orgs/<ORG>/projects/<NUMBER>`
+- User project: `https://github.com/users/<USER>/projects/<NUMBER>`
+
+---
+
+## 8. Fill in `appsettings.json`
+
+```json
+{
+  "GitHubApp": {
+    "ClientIdOrAppId": "Iv23li...",                 // from step 4
+    "PrivateKeyPath": "your-app.private-key.pem",    // from step 3 (next to appsettings.json)
+    "InstallationId": null                           // auto-discovered from Target.Owner
+  },
+  "Target": {
+    "Owner": "<ORG-or-USER>",                        // owner of BOTH the repo and the project
+    "OwnerType": "organization",                     // "organization" or "user"
+    "Repo": "<your-test-repo>",
+    "ProjectNumber": 19                              // from step 7
+  }
+}
+```
+
+`CustomFields` can stay as-is for the first run — the app prints every field and its valid
+options at startup, so you can copy the exact names/options for your project afterward.
+
+---
+
+## 9. Run
+
+```bash
+dotnet run
+```
+
+A successful run prints the installation id, the created issue URL, the project's fields,
+and a `✓` per field set.
+
+---
+
+## Troubleshooting
+
+These mirror the errors you'll most likely hit, in order:
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Could not find file '...private-key.pem'` | Key not found at the configured path | Put the `.pem` next to `appsettings.json`, or set an absolute path |
+| `look up installation: 404` / `No installation found for ...` | App not installed on `Target.Owner` | Install it on that owner (step 6); the app lists where it **is** installed |
+| `create issue: 404 Not Found` | Repo not in the installation's repo access (or wrong repo name) | Add the repo to the App install's **Repository access** |
+| `Resource not accessible by integration` | Missing/declined permission | Re-check Issues + Projects permissions and re-approve the install |
+| `Project #N not found` | Wrong number or `OwnerType` | Verify the project URL; org projects use `OwnerType: organization` |
+| `Option 'X' not found on field 'Y'` | Single-select value isn't a real option | Use an option name from the startup field listing (matched case-insensitively) |
+
+---
+
+## How it relates to the code
+
+| This guide | Used by |
+|------------|---------|
+| Client ID + private key | `GitHubAppAuthenticator.cs` — builds the JWT, gets the installation token |
+| Installation on the owner | `GitHubAppAuthenticator.GetInstallationIdAsync` (auto-discovers the id) |
+| Issues permission | `GitHubClient.CreateIssueAsync` (REST) |
+| Projects permission | `GitHubClient` GraphQL methods (resolve project, add item, set fields) |
