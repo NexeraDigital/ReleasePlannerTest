@@ -127,7 +127,7 @@ the exact names/options for your project and adjust the generator afterward.
 ## 9. Run
 
 ```bash
-dotnet run
+dotnet run --project src/GitHubProjectConnection.App
 ```
 
 A successful run logs the installation id, the created issue URL, the project's field count,

@@ -8,11 +8,29 @@ A production-shaped C# example that authenticates as a **GitHub App**, then:
 Projects V2 is **GraphQL-only** — there is no REST API for project fields, which is why
 the project parts of this sample use GraphQL while issue creation uses REST.
 
-It is built on the patterns the .NET team recommends for real services: the **Generic Host**
-with dependency injection, **typed `HttpClient`s** via `IHttpClientFactory`, the **standard
-resilience pipeline** (retry + circuit breaker + timeout) customized to honor GitHub's
-rate-limit rules, strongly-typed **validated options**, structured **logging**, **cancellation**,
-and **unit tests** + **CI**.
+The GitHub plumbing lives in a **reusable class library** (`GitHubProjects`) that a thin console
+app consumes — so you can reference the library and drive your own automation instead of editing
+the sample. It is built on the patterns the .NET team recommends for real services: the **Generic
+Host** with dependency injection, **typed `HttpClient`s** via `IHttpClientFactory`, the **standard
+resilience pipeline** (retry + circuit breaker + timeout) customized to honor GitHub's rate-limit
+rules, strongly-typed **validated options**, structured **logging**, **cancellation**, and
+**unit tests**.
+
+### Using the library
+
+Reference `GitHubProjects` and register it on any `IServiceCollection`, then inject the clients:
+
+```csharp
+// Bind GitHubAppOptions from config (Client ID, private key, installation id/owner)...
+services.AddGitHubProjects(configuration.GetSection("GitHubApp"));
+// ...or configure inline:
+services.AddGitHubProjects(o => { o.ClientIdOrAppId = "..."; o.PrivateKeyPem = pem; o.Owner = "my-org"; });
+
+// Then inject and use:
+//   IGitHubIssueClient    — create issues (REST)
+//   IGitHubProjectsClient — resolve a project, read fields/items, add items, set field values
+//   IGitHubFieldManager   — create/update/delete custom-field definitions
+```
 
 ## How it works
 
@@ -29,23 +47,34 @@ and **unit tests** + **CI**.
 ### Project layout
 
 ```
-Program.cs                       Host bootstrap (DI, options, typed clients) + orchestration
-Options/                         GitHubAppOptions, TargetOptions (validated on startup)
-Auth/
-  GitHubAppAuthenticator.cs      App JWT + installation-token calls
-  InstallationTokenProvider.cs   Caches the token until shortly before it expires
-Clients/
-  GitHubClientBase.cs            Shared auth headers + error handling
-  GitHubRestClient.cs            Issue creation (REST)
-  GitHubProjectsClient.cs        Projects V2 (GraphQL), with field pagination
-  ProjectModels.cs               Records + the (unit-tested) field-value shaping
-Resilience/
-  GitHubResilience.cs            AddStandardResilienceHandler wiring
-  GitHubRateLimit.cs             Retry-After / x-ratelimit-reset interpretation (unit-tested)
-Errors/GitHubApiException.cs     Typed errors parsed from REST/GraphQL bodies
-Sample/SampleDataGenerator.cs    Randomized sample data
-tests/                           xUnit tests (JWT, field shaping, errors, rate-limit)
+GitHubProjectConnection.slnx
+src/
+  GitHubProjects/                          ← the reusable library (reference this)
+    ServiceCollectionExtensions.cs         AddGitHubProjects(...) — the DI entry point
+    Configuration/GitHubAppOptions.cs      Validated App auth options
+    Authentication/
+      GitHubAppAuthenticator.cs            App JWT + installation-token calls (internal)
+      InstallationTokenProvider.cs         Caches the token until shortly before expiry (internal)
+    Clients/
+      IGitHubClients.cs                    IGitHubIssueClient / IGitHubProjectsClient / IGitHubFieldManager
+      GitHubClientBase.cs                  Shared auth headers + GraphQL + error handling (internal)
+      GitHubRestClient.cs                  Issue creation (REST, internal)
+      GitHubProjectsClient.cs              Projects V2 reads/writes (GraphQL, internal)
+      ManageFieldsClient.cs                Custom-field create/update/delete (GraphQL, internal)
+      ProjectModels.cs / ManageFieldModels.cs   Public records + (unit-tested) input/value shaping
+    Resilience/                            AddStandardResilienceHandler + GitHub rate-limit interpretation
+    GitHubApiException.cs                  Typed errors parsed from REST/GraphQL bodies
+  GitHubProjectConnection.App/             ← thin console consumer of the library
+    Program.cs                             Host bootstrap + orchestration
+    Options/TargetOptions.cs               App-specific repo/project target (validated)
+    Sample/                                Randomized data + the --* command runners
+    appsettings.json
+tests/
+  GitHubProjects.Tests/                    xUnit tests (JWT, field/value shaping, errors, rate-limit)
 ```
+
+Only the interfaces, options, DTOs, `GitHubApiException`, and `AddGitHubProjects` are **public**;
+the client implementations and auth/resilience plumbing are **internal**.
 
 ### Resilience & rate limits
 
@@ -112,16 +141,16 @@ export GitHubApp__PrivateKeyPem="$(cat key.pem)"   # takes precedence over Priva
 ## Run
 
 ```bash
-dotnet run
+dotnet run --project src/GitHubProjectConnection.App
 ```
 
 Each run creates a new **sample** issue (see [Sample data](#sample-data)). Expected output
 (logged via `ILogger`):
 
 ```
-info: GitHubProjectConnection.Auth.InstallationTokenProvider[0]
+info: GitHubProjects.InstallationTokenProvider[0]
       Using installation id 12345678.
-info: GitHubProjectConnection.Auth.InstallationTokenProvider[0]
+info: GitHubProjects.InstallationTokenProvider[0]
       Obtained installation access token (expires 2026-06-24 16:30:45Z).
 info: Program[0]
       Created issue #42: https://github.com/my-org/my-repo/issues/42
@@ -143,12 +172,13 @@ in `appsettings.json` and exits.
 
 | Command | What it does | Source |
 |---------|--------------|--------|
-| `dotnet run -- --manage-fields-demo` | Self-cleaning demo: creates a single-select field, updates it **non-destructively** (rename + keep existing options by id + add one), then deletes it. | `Sample/ManageFieldsDemo.cs` |
-| `dotnet run -- --convert-dropdowns` | Converts selected TEXT fields into single-select dropdowns. **Destructive** — GitHub can't change a field's type in place, so each field is **deleted and recreated**, losing its existing values. | `Sample/ConvertFieldsToDropdowns.cs` |
-| `dotnet run -- --populate-existing` | Walks **every item already in the project** and sets fresh sample values on each (re-randomizes on every run; unknown fields and bad values are skipped, not fatal). | `Sample/PopulateExistingItems.cs` |
+| `dotnet run --project src/GitHubProjectConnection.App -- --manage-fields-demo` | Self-cleaning demo: creates a single-select field, updates it **non-destructively** (rename + keep existing options by id + add one), then deletes it. | `Sample/ManageFieldsDemo.cs` |
+| `… -- --convert-dropdowns` | Converts selected TEXT fields into single-select dropdowns. **Destructive** — GitHub can't change a field's type in place, so each field is **deleted and recreated**, losing its existing values. | `Sample/ConvertFieldsToDropdowns.cs` |
+| `… -- --populate-existing` | Walks **every item already in the project** and sets fresh sample values on each (re-randomizes on every run; unknown fields and bad values are skipped, not fatal). | `Sample/PopulateExistingItems.cs` |
+| `… -- --validate-dropdown` | Proves a dropdown can be modified non-destructively: adds an option, verifies the existing ones survive, then reverts. | `Sample/ValidateDropdown.cs` |
 
-These are backed by `ManageFieldsClient` (`CreateFieldAsync` / `UpdateFieldAsync` /
-`DeleteFieldAsync`) and `GitHubProjectsClient.GetProjectItemsAsync`.
+These are backed by the library's `IGitHubFieldManager` (`CreateFieldAsync` / `UpdateFieldAsync` /
+`DeleteFieldAsync`) and `IGitHubProjectsClient.GetProjectItemsAsync`.
 
 > **Non-destructive option edits:** `UpdateFieldAsync` sends the **full** single-select option
 > list. Include each existing option's **`Id`** (from `GetProjectFieldsAsync`) to preserve it and

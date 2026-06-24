@@ -1,0 +1,252 @@
+using System.Text.Json;
+
+namespace GitHubProjects;
+
+/// <summary>
+/// Talks to GitHub's Projects V2 API, which is GraphQL-only: resolve a project, read its
+/// custom fields (paginated), list items, add an item, and set field values.
+/// </summary>
+internal sealed class GitHubProjectsClient : GitHubClientBase, IGitHubProjectsClient
+{
+    private const int PageSize = 50;
+
+    public GitHubProjectsClient(HttpClient http, InstallationTokenProvider tokenProvider)
+        : base(http, tokenProvider)
+    {
+    }
+
+    /// <summary>Resolves a project's node id from the owner login + project number.</summary>
+    public async Task<string> GetProjectIdAsync(
+        string owner, bool isOrganization, int projectNumber, CancellationToken cancellationToken)
+    {
+        string root = isOrganization ? "organization" : "user";
+        string query = $$"""
+            query($login: String!, $number: Int!) {
+              {{root}}(login: $login) {
+                projectV2(number: $number) { id }
+              }
+            }
+            """;
+
+        JsonElement data = await GraphQLAsync(query, new { login = owner, number = projectNumber }, "resolve project", cancellationToken);
+        JsonElement project = data.GetProperty(root).GetProperty("projectV2");
+        if (project.ValueKind == JsonValueKind.Null)
+            throw new GitHubApiException(
+                $"Project #{projectNumber} not found for {root} '{owner}'. " +
+                "Check the number and that the App has Projects access.");
+        return project.GetProperty("id").GetString()!;
+    }
+
+    /// <summary>Reads all custom fields (and single-select option ids) for a project, paging as needed.</summary>
+    public async Task<IReadOnlyDictionary<string, ProjectField>> GetProjectFieldsAsync(
+        string projectId, CancellationToken cancellationToken)
+    {
+        const string query = """
+            query($projectId: ID!, $pageSize: Int!, $after: String) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  fields(first: $pageSize, after: $after) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      ... on ProjectV2FieldCommon { id name dataType }
+                      ... on ProjectV2SingleSelectField {
+                        id name dataType
+                        options { id name }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var fields = new Dictionary<string, ProjectField>(StringComparer.OrdinalIgnoreCase);
+        string? after = null;
+
+        do
+        {
+            JsonElement data = await GraphQLAsync(
+                query, new { projectId, pageSize = PageSize, after }, "read project fields", cancellationToken);
+
+            JsonElement fieldsConn = data.GetProperty("node").GetProperty("fields");
+            foreach (JsonElement node in fieldsConn.GetProperty("nodes").EnumerateArray())
+            {
+                if (!node.TryGetProperty("id", out _)) continue; // skip unsupported field unions
+
+                string id = node.GetProperty("id").GetString()!;
+                string name = node.GetProperty("name").GetString()!;
+                string dataType = node.GetProperty("dataType").GetString()!;
+
+                var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (node.TryGetProperty("options", out JsonElement opts) && opts.ValueKind == JsonValueKind.Array)
+                    foreach (JsonElement opt in opts.EnumerateArray())
+                        options[opt.GetProperty("name").GetString()!] = opt.GetProperty("id").GetString()!;
+
+                fields[name] = new ProjectField(id, name, dataType, options);
+            }
+
+            JsonElement pageInfo = fieldsConn.GetProperty("pageInfo");
+            after = pageInfo.GetProperty("hasNextPage").GetBoolean()
+                ? pageInfo.GetProperty("endCursor").GetString()
+                : null;
+        }
+        while (after is not null);
+
+        return fields;
+    }
+
+    /// <summary>
+    /// Reads a single-select field's full option details (id, name, color, description) so an
+    /// update can round-trip them. Returns null if no single-select field has that name.
+    /// </summary>
+    public async Task<SingleSelectFieldDetail?> GetSingleSelectFieldAsync(
+        string projectId, string fieldName, CancellationToken cancellationToken)
+    {
+        const string query = """
+            query($projectId: ID!, $pageSize: Int!, $after: String) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  fields(first: $pageSize, after: $after) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      ... on ProjectV2SingleSelectField {
+                        id name
+                        options { id name color description }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        string? after = null;
+        do
+        {
+            JsonElement data = await GraphQLAsync(
+                query, new { projectId, pageSize = PageSize, after }, "read single-select field", cancellationToken);
+
+            JsonElement fieldsConn = data.GetProperty("node").GetProperty("fields");
+            foreach (JsonElement node in fieldsConn.GetProperty("nodes").EnumerateArray())
+            {
+                if (!node.TryGetProperty("options", out _)) continue; // not a single-select field union
+                if (!string.Equals(node.GetProperty("name").GetString(), fieldName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var options = new List<SingleSelectOption>();
+                foreach (JsonElement opt in node.GetProperty("options").EnumerateArray())
+                    options.Add(new SingleSelectOption(
+                        opt.GetProperty("name").GetString()!,
+                        opt.GetProperty("color").GetString()!,
+                        opt.GetProperty("description").GetString(),
+                        opt.GetProperty("id").GetString()!));
+
+                return new SingleSelectFieldDetail(node.GetProperty("id").GetString()!, node.GetProperty("name").GetString()!, options);
+            }
+
+            JsonElement pageInfo = fieldsConn.GetProperty("pageInfo");
+            after = pageInfo.GetProperty("hasNextPage").GetBoolean()
+                ? pageInfo.GetProperty("endCursor").GetString()
+                : null;
+        }
+        while (after is not null);
+
+        return null;
+    }
+
+    /// <summary>Lists every item already in a project (item id + linked issue/PR number and title), paging as needed.</summary>
+    public async Task<IReadOnlyList<ProjectItem>> GetProjectItemsAsync(
+        string projectId, CancellationToken cancellationToken)
+    {
+        const string query = """
+            query($projectId: ID!, $pageSize: Int!, $after: String) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  items(first: $pageSize, after: $after) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      id
+                      content {
+                        ... on Issue { number title }
+                        ... on PullRequest { number title }
+                        ... on DraftIssue { title }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var items = new List<ProjectItem>();
+        string? after = null;
+
+        do
+        {
+            JsonElement data = await GraphQLAsync(
+                query, new { projectId, pageSize = PageSize, after }, "read project items", cancellationToken);
+
+            JsonElement itemsConn = data.GetProperty("node").GetProperty("items");
+            foreach (JsonElement node in itemsConn.GetProperty("nodes").EnumerateArray())
+            {
+                string id = node.GetProperty("id").GetString()!;
+                int? number = null;
+                string? title = null;
+                if (node.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object)
+                {
+                    if (content.TryGetProperty("number", out JsonElement num)) number = num.GetInt32();
+                    if (content.TryGetProperty("title", out JsonElement t)) title = t.GetString();
+                }
+                items.Add(new ProjectItem(id, number, title));
+            }
+
+            JsonElement pageInfo = itemsConn.GetProperty("pageInfo");
+            after = pageInfo.GetProperty("hasNextPage").GetBoolean()
+                ? pageInfo.GetProperty("endCursor").GetString()
+                : null;
+        }
+        while (after is not null);
+
+        return items;
+    }
+
+    /// <summary>Adds an issue/PR (by content node id) to a project. Returns the project item id.</summary>
+    public async Task<string> AddItemToProjectAsync(
+        string projectId, string contentNodeId, CancellationToken cancellationToken)
+    {
+        const string mutation = """
+            mutation($projectId: ID!, $contentId: ID!) {
+              addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                item { id }
+              }
+            }
+            """;
+
+        JsonElement data = await GraphQLAsync(
+            mutation, new { projectId, contentId = contentNodeId }, "add item to project", cancellationToken);
+        return data.GetProperty("addProjectV2ItemById").GetProperty("item").GetProperty("id").GetString()!;
+    }
+
+    /// <summary>
+    /// Sets one custom field on a project item. The GraphQL value shape depends on the field's
+    /// data type (text / number / date / single-select); see <see cref="ProjectFieldValue"/>.
+    /// </summary>
+    public async Task UpdateFieldValueAsync(
+        string projectId, string itemId, ProjectField field, JsonElement rawValue, CancellationToken cancellationToken)
+    {
+        object value = ProjectFieldValue.Build(field, rawValue);
+
+        const string mutation = """
+            mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+              updateProjectV2ItemFieldValue(
+                input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value }
+              ) {
+                projectV2Item { id }
+              }
+            }
+            """;
+
+        await GraphQLAsync(
+            mutation, new { projectId, itemId, fieldId = field.Id, value }, "set field value", cancellationToken);
+    }
+}

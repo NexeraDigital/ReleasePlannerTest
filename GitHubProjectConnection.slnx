@@ -1,6 +1,9 @@
 <Solution>
-  <Folder Name="/tests/">
-    <Project Path="tests/GitHubProjectConnection.Tests/GitHubProjectConnection.Tests.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/GitHubProjectConnection.App/GitHubProjectConnection.App.csproj" />
+    <Project Path="src/GitHubProjects/GitHubProjects.csproj" />
   </Folder>
-  <Project Path="GitHubProjectConnection.csproj" />
+  <Folder Name="/tests/">
+    <Project Path="tests/GitHubProjects.Tests/GitHubProjects.Tests.csproj" />
+  </Folder>
 </Solution>
