@@ -64,7 +64,20 @@ Editing a **project field value** bumps the **item's** `updatedAt` but **not the
   `item.UpdatedAt` client-side — that cannot miss a property change. Keep the item count bounded by
   archiving completed items.
 
-### 4. No optimistic concurrency on field values
+### 4. The server `updated:` filter is eventually consistent (indexing lag) — verified
+The `query:` filter is backed by a search index that lags a few seconds behind writes. In testing, a
+newly created item was **absent** from `updated:>=…` immediately after creation (12 items), then
+appeared ~15–45s later (13 items, stable thereafter). So a poll fired right after a change can **miss
+it on that pass**. Mitigations:
+- **Overlap the watermark** (re-query from `watermark - 1 day`/some slack and **dedup by item id**) so
+  a change missed in one poll is caught in the next — this is already in the loop above.
+- For **lag-free** reads, use `GetProjectItemValuesAsync` (full scan, **no** `query:` filter — it
+  reads items directly, not the search index) and compare `item.UpdatedAt` client-side. Trade more
+  data for immediate freshness.
+- Don't treat "not in this poll" as "not changed" — only advance the watermark to timestamps you have
+  actually observed.
+
+### 5. No optimistic concurrency on field values
 GitHub has no ETag/version on a project field value; writes are **last-write-wins**. For two-way sync:
 - Define a **per-field owner** (which side wins for each property).
 - Use **timestamps** (`field.UpdatedAt`) and the watermark to order changes.
@@ -97,6 +110,8 @@ project items (via `updated:` / `item.updatedAt`) for properties, and issues (`s
 - Filter works (node counts): `updated:>2030-01-01` → 0, `updated:>2026-06-01` → all, `Organization:Security` → 3.
 - Date granularity: `updated:>2026-06-24T00:00:00Z` → 0 vs `updated:>2026-06-23` → all.
 - Field edit moves `item.updatedAt` but not `issue.updatedAt` (before/after on issue #12).
+- Indexing lag: a newly created item was absent from `updated:>=…` immediately, then appeared ~15–45s
+  later (12 → 13 items, stable across subsequent polls).
 - All against `github.com/orgs/NexeraDigital/projects/19`.
 
 ## Official sources
