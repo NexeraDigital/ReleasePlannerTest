@@ -1,0 +1,5 @@
+bin/
+obj/
+
+# Never commit the App's private key
+*.pem
