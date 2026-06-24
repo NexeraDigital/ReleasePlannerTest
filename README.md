@@ -37,6 +37,10 @@ GitHub Project's custom fields.
 
 ## Prerequisites
 
+> **New to GitHub Apps?** See [docs/CREATE-TEST-GITHUB-APP.md](docs/CREATE-TEST-GITHUB-APP.md)
+> for a full step-by-step guide to registering a test App, installing it, and filling in
+> `appsettings.json` (with a troubleshooting table). The summary below is the short version.
+
 ### 1. Create / configure a GitHub App
 In the App settings, grant these **permissions**:
 
