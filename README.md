@@ -33,7 +33,6 @@ GitHub Project's custom fields.
   every run, so repeated runs create distinct sample issues.
 - Issues created by this tool are safe to delete. Run it only against a **test repo and
   test project**, never a production board.
-- The static values in `appsettings.json` under `CustomFields` are likewise placeholders.
 
 ## Prerequisites
 
@@ -59,8 +58,9 @@ and **download the private key** (`.pem`).
 - `GitHubApp.InstallationId` — optional; auto-discovered from `Target.Owner` if left null.
 - `Target.Owner` / `OwnerType` / `Repo` / `ProjectNumber` — from the project URL
   `github.com/orgs/<owner>/projects/<ProjectNumber>`.
-- `CustomFields` — map of **field name → value**. For single-select fields use the
-  **option name**; text/number/date are matched to the field's data type automatically.
+
+The issue and custom-field values are generated per run by `SampleDataGenerator.cs`
+(not configured in `appsettings.json`).
 
 Any value can also be supplied via environment variables, e.g.
 `GitHubApp__PrivateKeyPath=/secure/key.pem`.

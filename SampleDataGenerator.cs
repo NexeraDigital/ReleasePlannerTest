@@ -16,9 +16,6 @@ public sealed record GeneratedIssueData(
 /// The values returned match the custom fields of the "Release Planner Test"
 /// project (#19). Single-select values use real option names; dates are future
 /// dates in chronological order; text fields are varied per run.
-///
-/// Not wired into Program.cs — see the note at the bottom of this file for the
-/// one-time change needed to use it.
 /// </summary>
 public static class SampleDataGenerator
 {
@@ -96,21 +93,3 @@ public static class SampleDataGenerator
     // Wrap a value as a JsonElement so it plugs straight into GitHubClient.UpdateFieldValueAsync.
     private static JsonElement Text(string value) => JsonSerializer.SerializeToElement(value);
 }
-
-// ---------------------------------------------------------------------------
-// To use this generator instead of the static appsettings.json values, change
-// these three lines in Program.cs:
-//
-//     CreatedIssue issue = await github.CreateIssueAsync(owner, repo, issueTitle, issueBody);
-//     ...
-//     foreach ((string fieldName, JsonElement value) in desiredFields)
-//
-// to:
-//
-//     GeneratedIssueData sample = SampleDataGenerator.Generate();
-//     CreatedIssue issue = await github.CreateIssueAsync(owner, repo, sample.Title, sample.Body);
-//     ...
-//     foreach ((string fieldName, JsonElement value) in sample.Fields)
-//
-// (issueTitle/issueBody/desiredFields from config then become unused.)
-// ---------------------------------------------------------------------------

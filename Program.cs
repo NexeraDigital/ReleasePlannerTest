@@ -19,13 +19,8 @@ string owner = Require(config, "Target:Owner");
 bool isOrg = config["Target:OwnerType"]?.Equals("organization", StringComparison.OrdinalIgnoreCase) ?? true;
 string repo = Require(config, "Target:Repo");
 int projectNumber = int.Parse(Require(config, "Target:ProjectNumber"));
-string issueTitle = Require(config, "Issue:Title");
-string? issueBody = config["Issue:Body"];
 
 string privateKeyPem = File.ReadAllText(ResolvePath(privateKeyPath));
-
-// Custom fields the user wants populated: field name -> raw JSON value.
-Dictionary<string, JsonElement> desiredFields = ReadCustomFields(config);
 
 // One HttpClient for everything. GitHub requires a User-Agent header.
 using var http = new HttpClient { BaseAddress = new Uri("https://api.github.com/") };
@@ -119,25 +114,4 @@ static string ResolvePath(string path)
     throw new FileNotFoundException(
         $"Could not find '{path}'. Place it next to appsettings.json or set " +
         "GitHubApp:PrivateKeyPath to an absolute path.");
-}
-
-static Dictionary<string, JsonElement> ReadCustomFields(IConfiguration config)
-{
-    // Re-read the raw JSON so values keep their real types (number vs string).
-    // Allow JSONC-style comments so appsettings.json can be annotated inline.
-    var options = new JsonDocumentOptions
-    {
-        CommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
-    };
-    using JsonDocument doc = JsonDocument.Parse(
-        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "appsettings.json")),
-        options);
-
-    var result = new Dictionary<string, JsonElement>();
-    if (doc.RootElement.TryGetProperty("CustomFields", out JsonElement custom))
-        foreach (JsonProperty prop in custom.EnumerateObject())
-            result[prop.Name] = prop.Value.Clone();
-
-    return result;
 }
