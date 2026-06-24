@@ -57,6 +57,19 @@ public static class ManageFieldInputs
     public static Dictionary<string, object?> DeleteField(string fieldId) =>
         new() { ["fieldId"] = fieldId };
 
+    /// <summary>
+    /// Produces the full single-select option list for an additive update: the existing options
+    /// (kept first, in order) followed by any of <paramref name="toAdd"/> whose name isn't already
+    /// present (case-insensitive). Existing options are returned unchanged so their ids — and the
+    /// item values assigned to them — are preserved when sent to <c>updateProjectV2Field</c>.
+    /// </summary>
+    public static IReadOnlyList<SingleSelectOption> MergeNewOptions(
+        IReadOnlyList<SingleSelectOption> existing, IReadOnlyList<SingleSelectOption> toAdd)
+    {
+        var names = new HashSet<string>(existing.Select(o => o.Name), StringComparer.OrdinalIgnoreCase);
+        return existing.Concat(toAdd.Where(o => names.Add(o.Name))).ToList();
+    }
+
     private static Dictionary<string, object?> ToOption(SingleSelectOption o)
     {
         // name, color, and description are all required by ProjectV2SingleSelectFieldOptionInput.

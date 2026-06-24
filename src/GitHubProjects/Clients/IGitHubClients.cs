@@ -53,4 +53,14 @@ public interface IGitHubFieldManager
 
     /// <summary>Deletes a custom field (removes the field and all its values across items).</summary>
     Task DeleteFieldAsync(string fieldId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Adds options to an existing single-select field <strong>without clearing the current ones</strong>.
+    /// Fetches the field's existing options, appends any of <paramref name="newOptions"/> whose name
+    /// isn't already present (case-insensitive), and writes the merged set back — existing options keep
+    /// their id, so item values already assigned to them are preserved. Returns the field's resulting
+    /// options. No mutation is sent if every requested option already exists.
+    /// </summary>
+    Task<ProjectField> AddSingleSelectOptionsAsync(
+        string projectId, string fieldName, IReadOnlyList<SingleSelectOption> newOptions, CancellationToken cancellationToken);
 }

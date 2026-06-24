@@ -9,9 +9,12 @@ namespace GitHubProjects;
 /// </summary>
 internal sealed class ManageFieldsClient : GitHubClientBase, IGitHubFieldManager
 {
-    public ManageFieldsClient(HttpClient http, InstallationTokenProvider tokenProvider)
+    private readonly IGitHubProjectsClient _projects;
+
+    public ManageFieldsClient(HttpClient http, InstallationTokenProvider tokenProvider, IGitHubProjectsClient projects)
         : base(http, tokenProvider)
     {
+        _projects = projects;
     }
 
     /// <summary>
@@ -74,6 +77,34 @@ internal sealed class ManageFieldsClient : GitHubClientBase, IGitHubFieldManager
 
         await GraphQLAsync(
             mutation, new { input = ManageFieldInputs.DeleteField(fieldId) }, "delete project field", cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds options to a single-select field without clearing existing ones (fetch → merge → update).
+    /// See <see cref="IGitHubFieldManager.AddSingleSelectOptionsAsync"/>.
+    /// </summary>
+    public async Task<ProjectField> AddSingleSelectOptionsAsync(
+        string projectId, string fieldName, IReadOnlyList<SingleSelectOption> newOptions, CancellationToken cancellationToken)
+    {
+        SingleSelectFieldDetail field =
+            await _projects.GetSingleSelectFieldAsync(projectId, fieldName, cancellationToken)
+            ?? throw new GitHubApiException($"No single-select field named '{fieldName}' was found in the project.");
+
+        IReadOnlyList<SingleSelectOption> merged = ManageFieldInputs.MergeNewOptions(field.Options, newOptions);
+
+        // Nothing new to add — return the current state without an unnecessary mutation.
+        if (merged.Count == field.Options.Count)
+            return ToProjectField(field);
+
+        return await UpdateFieldAsync(field.FieldId, name: null, merged, cancellationToken);
+    }
+
+    private static ProjectField ToProjectField(SingleSelectFieldDetail field)
+    {
+        var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (SingleSelectOption opt in field.Options)
+            if (opt.Id is not null) options[opt.Name] = opt.Id;
+        return new ProjectField(field.FieldId, field.Name, "SINGLE_SELECT", options);
     }
 
     private static ProjectField ParseField(JsonElement node)

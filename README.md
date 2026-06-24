@@ -16,6 +16,54 @@ resilience pipeline** (retry + circuit breaker + timeout) customized to honor Gi
 rules, strongly-typed **validated options**, structured **logging**, **cancellation**, and
 **unit tests**.
 
+## Quickstart
+
+You need the **.NET 10 SDK** and a **GitHub App** installed on the org/account that owns your test
+repo and project.
+
+**1. Create and install a GitHub App.** Follow [docs/CREATE-TEST-GITHUB-APP.md](docs/CREATE-TEST-GITHUB-APP.md)
+— register the App with **Issues: Read & write** and **Projects: Read & write**, install it on your
+owner, download the private key (`.pem`), and copy the **Client ID**. (Use a **test** repo and project.)
+
+**2. Configure** `src/GitHubProjectConnection.App/appsettings.json`:
+
+```json
+{
+  "GitHubApp": {
+    "ClientIdOrAppId": "Iv23li…",                       // your App's Client ID
+    "PrivateKeyPath": "your-app.private-key.pem",       // path to the downloaded .pem
+    "InstallationId": null                              // auto-discovered from Target.Owner
+  },
+  "Target": {
+    "Owner": "my-org",            // owner of BOTH the repo and the project
+    "OwnerType": "organization",  // "organization" or "user"
+    "Repo": "my-repo",
+    "ProjectNumber": 1            // from github.com/orgs/<owner>/projects/<NUMBER>
+  }
+}
+```
+
+Place the `.pem` where the app can find it — next to `appsettings.json`, or at the repo root
+(relative `PrivateKeyPath` is resolved against the working directory and the output folder). Never
+commit it (`*.pem` is git-ignored). For secrets, set `GitHubApp__PrivateKeyPem` instead — see
+[Supplying the private key as a secret](#supplying-the-private-key-as-a-secret).
+
+**3. Run** (from the repo root):
+
+```bash
+dotnet run --project src/GitHubProjectConnection.App            # default: create a sample issue + populate fields
+dotnet run --project src/GitHubProjectConnection.App -- --help  # list all commands
+```
+
+**4. Test:**
+
+```bash
+dotnet test
+```
+
+> Everything the app writes is **sample/test data** — see [Sample data](#sample-data). Run it only
+> against a test repo and project. Stuck? See [Notes & troubleshooting](#notes--troubleshooting).
+
 ### Using the library
 
 Reference `GitHubProjects` and register it on any `IServiceCollection`, then inject the clients:
@@ -178,6 +226,7 @@ in `appsettings.json` and exits.
 | `… -- --convert-dropdowns` | Converts selected TEXT fields into single-select dropdowns. **Destructive** — GitHub can't change a field's type in place, so each field is **deleted and recreated**, losing its existing values. | `Commands/ConvertDropdownsCommand.cs` |
 | `… -- --populate-existing` | Walks **every item already in the project** and sets fresh sample values on each (re-randomizes on every run; unknown fields and bad values are skipped, not fatal). | `Commands/PopulateExistingCommand.cs` |
 | `… -- --validate-dropdown` | Proves a dropdown can be modified non-destructively: adds an option, verifies the existing ones survive, then reverts. | `Commands/ValidateDropdownCommand.cs` |
+| `… -- --add-option-demo` | Adds a dropdown option **without clearing existing ones** (idempotent + case-insensitive), then reverts. | `Commands/AddOptionsDemoCommand.cs` |
 | `… -- --help` | List all commands and exit. | `Commands/HelpCommand.cs` |
 
 Commands follow a small **command pattern**: each implements `ISampleCommand` (a `Flag`, a
@@ -188,9 +237,16 @@ line in `Hosting/SampleServiceCollectionExtensions.cs`.
 These are backed by the library's `IGitHubFieldManager` (`CreateFieldAsync` / `UpdateFieldAsync` /
 `DeleteFieldAsync`) and `IGitHubProjectsClient.GetProjectItemsAsync`.
 
-> **Non-destructive option edits:** `UpdateFieldAsync` sends the **full** single-select option
-> list. Include each existing option's **`Id`** (from `GetProjectFieldsAsync`) to preserve it and
-> the values already assigned to it; any option you omit is removed.
+> **Adding dropdown options without clearing existing ones:** call
+> `IGitHubFieldManager.AddSingleSelectOptionsAsync(projectId, fieldName, newOptions)`. It fetches the
+> current options, appends only the names that don't already exist (case-insensitive), and writes the
+> merged set back — a safe one-call read-modify-write. (GitHub's `updateProjectV2Field` **overwrites**
+> the option set, so the existing options must be re-sent with their `Id`s; the schema confirms the
+> `id` "prevents item field values from being cleared." This method handles that for you.)
+
+> **Lower-level edits:** `UpdateFieldAsync` sends the **full** single-select option list. Include each
+> existing option's **`Id`** (from `GetSingleSelectFieldAsync`) to preserve it and the values already
+> assigned to it; any option you omit is removed.
 
 > **Field types can't be changed in place.** There is no API to turn a TEXT field into a
 > SINGLE_SELECT; converting means delete + recreate, which clears that field's values across all

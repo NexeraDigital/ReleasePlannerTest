@@ -66,4 +66,57 @@ public class ManageFieldInputsTests
     {
         Assert.Equal("{\"fieldId\":\"FIELD\"}", Serialize(ManageFieldInputs.DeleteField("FIELD")));
     }
+
+    [Fact]
+    public void MergeNewOptions_keeps_existing_first_then_appends_new()
+    {
+        var existing = new[]
+        {
+            new SingleSelectOption("Low", "GRAY", Id: "o1"),
+            new SingleSelectOption("High", "RED", Id: "o2"),
+        };
+        var toAdd = new[] { new SingleSelectOption("At Risk", "RED") };
+
+        var merged = ManageFieldInputs.MergeNewOptions(existing, toAdd);
+
+        Assert.Equal(new[] { "Low", "High", "At Risk" }, merged.Select(o => o.Name));
+        Assert.Equal("o1", merged[0].Id);   // existing ids preserved
+        Assert.Equal("o2", merged[1].Id);
+        Assert.Null(merged[2].Id);          // new option has no id
+    }
+
+    [Fact]
+    public void MergeNewOptions_skips_names_that_already_exist_case_insensitively()
+    {
+        var existing = new[] { new SingleSelectOption("High", "RED", Id: "o1") };
+        var toAdd = new[] { new SingleSelectOption("high", "GREEN"), new SingleSelectOption("New", "BLUE") };
+
+        var merged = ManageFieldInputs.MergeNewOptions(existing, toAdd);
+
+        Assert.Equal(new[] { "High", "New" }, merged.Select(o => o.Name));
+        Assert.Equal("RED", merged[0].Color); // existing 'High' untouched (not replaced by 'high')
+    }
+
+    [Fact]
+    public void MergeNewOptions_dedupes_within_the_added_batch()
+    {
+        var existing = Array.Empty<SingleSelectOption>();
+        var toAdd = new[] { new SingleSelectOption("A"), new SingleSelectOption("a"), new SingleSelectOption("B") };
+
+        var merged = ManageFieldInputs.MergeNewOptions(existing, toAdd);
+
+        Assert.Equal(new[] { "A", "B" }, merged.Select(o => o.Name));
+    }
+
+    [Fact]
+    public void MergeNewOptions_returns_existing_count_when_nothing_new()
+    {
+        var existing = new[] { new SingleSelectOption("High", "RED", Id: "o1") };
+        var toAdd = new[] { new SingleSelectOption("HIGH", "GREEN") };
+
+        var merged = ManageFieldInputs.MergeNewOptions(existing, toAdd);
+
+        Assert.Single(merged);
+        Assert.Equal(existing.Length, merged.Count); // signals "nothing added" to the caller
+    }
 }
