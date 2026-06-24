@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using System.Text.Json;
 using GitHubProjectConnection.Auth;
 using GitHubProjectConnection.Errors;
@@ -98,6 +97,62 @@ public sealed class GitHubProjectsClient : GitHubClientBase
         return fields;
     }
 
+    /// <summary>Lists every item already in a project (item id + linked issue/PR number and title), paging as needed.</summary>
+    public async Task<IReadOnlyList<ProjectItem>> GetProjectItemsAsync(
+        string projectId, CancellationToken cancellationToken)
+    {
+        const string query = """
+            query($projectId: ID!, $pageSize: Int!, $after: String) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  items(first: $pageSize, after: $after) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      id
+                      content {
+                        ... on Issue { number title }
+                        ... on PullRequest { number title }
+                        ... on DraftIssue { title }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var items = new List<ProjectItem>();
+        string? after = null;
+
+        do
+        {
+            JsonElement data = await GraphQLAsync(
+                query, new { projectId, pageSize = FieldPageSize, after }, "read project items", cancellationToken);
+
+            JsonElement itemsConn = data.GetProperty("node").GetProperty("items");
+            foreach (JsonElement node in itemsConn.GetProperty("nodes").EnumerateArray())
+            {
+                string id = node.GetProperty("id").GetString()!;
+                int? number = null;
+                string? title = null;
+                if (node.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object)
+                {
+                    if (content.TryGetProperty("number", out JsonElement num)) number = num.GetInt32();
+                    if (content.TryGetProperty("title", out JsonElement t)) title = t.GetString();
+                }
+                items.Add(new ProjectItem(id, number, title));
+            }
+
+            JsonElement pageInfo = itemsConn.GetProperty("pageInfo");
+            after = pageInfo.GetProperty("hasNextPage").GetBoolean()
+                ? pageInfo.GetProperty("endCursor").GetString()
+                : null;
+        }
+        while (after is not null);
+
+        return items;
+    }
+
     /// <summary>Adds an issue/PR (by content node id) to a project. Returns the project item id.</summary>
     public async Task<string> AddItemToProjectAsync(
         string projectId, string contentNodeId, CancellationToken cancellationToken)
@@ -136,26 +191,5 @@ public sealed class GitHubProjectsClient : GitHubClientBase
 
         await GraphQLAsync(
             mutation, new { projectId, itemId, fieldId = field.Id, value }, "set field value", cancellationToken);
-    }
-
-    /// <summary>Posts a GraphQL query/mutation and returns the "data" element, throwing on GraphQL errors.</summary>
-    private async Task<JsonElement> GraphQLAsync(
-        string query, object variables, string operation, CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "graphql")
-        {
-            Content = JsonContent.Create(new { query, variables })
-        };
-        await ApplyHeadersAsync(request, cancellationToken);
-
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await EnsureSuccessAsync(response, operation, cancellationToken);
-
-        JsonElement payload = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-        if (payload.TryGetProperty("errors", out JsonElement errors) &&
-            errors.ValueKind == JsonValueKind.Array && errors.GetArrayLength() > 0)
-            throw GitHubApiException.FromGraphQL(operation, errors);
-
-        return payload.GetProperty("data");
     }
 }

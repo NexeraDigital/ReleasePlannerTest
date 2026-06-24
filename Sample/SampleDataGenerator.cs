@@ -22,22 +22,19 @@ public static class SampleDataGenerator
     private static readonly string[] Statuses = { "Todo", "In Progress", "Done" };           // Status single-select
     private static readonly string[] YesNo = { "Yes", "No" };                                  // NewProduct single-select
 
+    // Single-select option names — must match the project's dropdown options.
     private static readonly string[] Organizations =
-        { "Azure Core", "Azure Compute", "Azure Networking", "Azure Data", "Developer Division" };
+        { "Azure", "Microsoft 365", "Security", "Developer Division" };
     private static readonly string[] ProductGroupings =
-        { "Developer Tools", "Platform", "Identity", "Storage", "AI Platform" };
+        { "Compute", "Storage", "Networking", "AI Platform", "Identity" };
     private static readonly string[] Features =
         { "Release Planner", "Rollout Tracker", "Dependency Map", "Launch Calendar", "Readiness Board" };
     private static readonly string[] Services =
         { "Release Planner Service", "Rollout API", "Planning Hub", "Schedule Service" };
     private static readonly string[] Scenarios =
-        {
-            "Plan and track feature releases across teams",
-            "Coordinate preview and GA milestones",
-            "Surface release risk before launch",
-            "Align PM and engineering on rollout dates"
-        };
-    private static readonly string[] VisibilityLevels = { "Public", "Internal", "Confidential" };
+        { "New Feature", "Enhancement", "Deprecation", "Migration" };          // Scenarios single-select
+    private static readonly string[] VisibilityLevels =
+        { "Public", "Internal", "Microsoft Confidential" };                    // Roadmap Visibility single-select
     private static readonly string[] PmNames =
         { "Russ Smith", "Jordan Lee", "Priya Nair", "Sam Carter", "Dana Wu" };
     private static readonly string[] PmLeadershipTeams =

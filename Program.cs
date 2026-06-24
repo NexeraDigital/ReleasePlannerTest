@@ -35,6 +35,7 @@ builder.Services.AddSingleton<InstallationTokenProvider>();
 builder.Services.AddHttpClient<GitHubAppAuthenticator>(ConfigureGitHubClient).AddGitHubResilience();
 builder.Services.AddHttpClient<GitHubRestClient>(ConfigureGitHubClient).AddGitHubResilience();
 builder.Services.AddHttpClient<GitHubProjectsClient>(ConfigureGitHubClient).AddGitHubResilience();
+builder.Services.AddHttpClient<ManageFieldsClient>(ConfigureGitHubClient).AddGitHubResilience();
 
 using IHost host = builder.Build();
 
@@ -57,6 +58,29 @@ GitHubProjectsClient projects = host.Services.GetRequiredService<GitHubProjectsC
 
 try
 {
+    // Optional: demonstrate managing custom-field DEFINITIONS (create/update/delete).
+    // Self-cleaning — see Sample/ManageFieldsDemo.cs. Run: dotnet run -- --manage-fields-demo
+    if (args.Contains("--manage-fields-demo"))
+    {
+        ManageFieldsClient manage = host.Services.GetRequiredService<ManageFieldsClient>();
+        return await ManageFieldsDemo.RunAsync(manage, projects, target, logger, cts.Token);
+    }
+
+    // Optional: convert selected TEXT fields into single-select dropdowns (delete + recreate).
+    // Run: dotnet run -- --convert-dropdowns
+    if (args.Contains("--convert-dropdowns"))
+    {
+        ManageFieldsClient manage = host.Services.GetRequiredService<ManageFieldsClient>();
+        return await ConvertFieldsToDropdowns.RunAsync(manage, projects, target, logger, cts.Token);
+    }
+
+    // Optional: set fresh sample values on every item already in the project.
+    // Run: dotnet run -- --populate-existing
+    if (args.Contains("--populate-existing"))
+    {
+        return await PopulateExistingItems.RunAsync(projects, target, logger, cts.Token);
+    }
+
     // 1. Generate fresh sample data so repeated runs produce distinct issues/values.
     GeneratedIssueData sample = SampleDataGenerator.Generate();
 

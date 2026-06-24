@@ -9,6 +9,9 @@ public sealed record ProjectField(string Id, string Name, string DataType, IRead
 /// <summary>The result of creating an issue.</summary>
 public sealed record CreatedIssue(string NodeId, int Number, string HtmlUrl);
 
+/// <summary>An existing item in a project, with the linked issue/PR number and title when present.</summary>
+public sealed record ProjectItem(string Id, int? Number, string? Title);
+
 /// <summary>
 /// Translates a raw configured/sample value into the GraphQL <c>ProjectV2FieldValue</c> shape
 /// for a given field's data type. Pure (no I/O) so it is straightforward to unit test.
